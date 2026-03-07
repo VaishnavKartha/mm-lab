@@ -1,3 +1,4 @@
+.vscode/
 output/
 tcp-s.c
 tcpw-c.c
