@@ -1,187 +1,195 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <time.h>
+#include<stdio.h>
+#include<unistd.h>
+#include<stdlib.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<sys/socket.h>
+#include<time.h>
 
 #define PORT 8080
-#define BUFFER_SIZE 1024
 
-int main()
-{
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-    char buffer[BUFFER_SIZE] = {0};
+typedef struct packet{
+    char data[1024];
+}Packet;
 
-    int ack_prob = 70;   // 70% chance of sending ACK
+typedef struct frame{
+    int frame_kind;
+    int sq_no;
+    int ack;
+    Packet packet;
+}Frame;
 
-    srand(time(0));      // Random seed for ACK simulation
+int main(){
+    int sockfd;
+    struct sockaddr_in server,client;
+    socklen_t len=sizeof(client);
 
-    // Create socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
+    Frame frame_recv,frame_snd;
 
-    // Define server address
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    srand(time(0));
 
-    // Bind socket to port
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        perror("Bind failed");
-        exit(EXIT_FAILURE);
-    }
+    sockfd=socket(AF_INET,SOCK_DGRAM,0);
 
-    // Listen for incoming connections
-    if (listen(server_fd, 3) < 0)
-    {
-        perror("Listen failed");
-        exit(EXIT_FAILURE);
-    }
+    server.sin_family=AF_INET;
+    server.sin_port=htons(PORT);
+    server.sin_addr.s_addr=INADDR_ANY;
 
-    printf("Server: Waiting for connection...\n");
+    bind(sockfd,(struct sockaddr*)&server,sizeof(server));
 
-    // Accept connection from client
-    if ((new_socket = accept(server_fd,
-                             (struct sockaddr *)&address,
-                             (socklen_t *)&addrlen)) < 0)
-    {
-        perror("Accept failed");
-        exit(EXIT_FAILURE);
-    }
+    int expected_frame=0;
 
-    printf("Server: Connection established.\n");
+    while(1){
 
-    while (1)
-    {
-        // Receive packet from client
-        int valread = read(new_socket, buffer, BUFFER_SIZE);
+        int n = recvfrom(sockfd,&frame_recv,sizeof(Frame),0,(struct sockaddr *)&client,&len);
 
-        if (valread == 0)
-            break;
+        if( n > 0){
 
-        printf("Server: Received packet - %s\n", buffer);
+            if(frame_recv.frame_kind == 1 && frame_recv.sq_no == expected_frame ){
 
-        // Simulate ACK or loss
-        if (rand() % 100 < ack_prob)
-        {
-            printf("Server: ACK sent for packet %s\n\n", buffer);
-            send(new_socket, "ACK", strlen("ACK"), 0);
+                printf("[Server] Frame %d received : %s\n",frame_recv.sq_no,frame_recv.packet.data);
+
+                int random=rand() % 100 ;
+
+                if(random < 80 ){
+                    frame_snd.frame_kind = 0;
+                    frame_snd.ack=expected_frame + 1;
+
+                    sendto(sockfd,&frame_snd,sizeof(Frame),0,(struct sockaddr *)&client,len);
+
+                    printf("[Server] Ack sent for frame %d (Random=%d)\n ",frame_recv.sq_no,random);
+
+                    expected_frame ++ ;
+                }
+
+                else{
+                    printf("[Server] Ack Lost\n");
+                }
+
+
+            }else{
+                printf("[Server] Duplicate Frame %d Received\n",frame_recv.sq_no);
+
+                frame_snd.frame_kind = 0;
+                frame_snd.ack=expected_frame;
+
+
+                sendto(sockfd,&frame_snd,sizeof(Frame),0,(struct sockaddr*)&client,len);
+
+                printf("Ack Resent\n");
+            }
         }
-        else
-        {
-            printf("Server: ACK lost for packet %s\n\n", buffer);
-        }
-
-        memset(buffer, 0, BUFFER_SIZE);   // Clear buffer
     }
 
-    close(new_socket);
-    close(server_fd);
+    close(sockfd);
 
-    return 0;
+    return 0 ;
 }
 
 
 
 
-//client
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/time.h>
+
+
+
+
+
+
+
+
+//client
+#include<stdio.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<time.h>
+#include<string.h>
+#include<sys/time.h>
+#include<arpa/inet.h>
+#include<sys/socket.h>
 
 #define PORT 8080
-#define BUFFER_SIZE 1024
-#define TIMEOUT 3      // Timeout in seconds
 
-int main()
-{
-    int sock = 0;
-    struct sockaddr_in serv_addr;
+typedef struct packet{
+    char data[1024];
+}Packet;
 
-    char buffer[BUFFER_SIZE] = {0};
-    char packet[50];
+typedef struct frame{
+    int frame_kind;
+    int sq_no;
+    int ack;
+    Packet packet;
+}Frame;
+
+int main(){
+    int sockfd;
+    struct sockaddr_in server;
+    socklen_t len=sizeof(server);
+
+    int frame_id=0;
+
+    srand(time(0));
+
+    sockfd=socket(AF_INET,SOCK_DGRAM,0);
 
     struct timeval tv;
 
-    // Create socket
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-    {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
+    tv.tv_sec=2;
+    tv.tv_usec=0;
 
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
+    setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
 
-    // Convert IP address
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0)
-    {
-        perror("Invalid address or Address not supported");
-        exit(EXIT_FAILURE);
-    }
+    server.sin_family=AF_INET;
+    server.sin_port=htons(PORT);
+    server.sin_addr.s_addr=inet_addr("127.0.0.1");
 
-    // Connect to server
-    if (connect(sock,
-                (struct sockaddr *)&serv_addr,
-                sizeof(serv_addr)) < 0)
-    {
-        perror("Connection failed");
-        exit(EXIT_FAILURE);
-    }
+    Frame frame_recv,frame_snd;
 
-    printf("Client: Connected to server.\n");
+    while(1){
 
-    // Set socket timeout
-    tv.tv_sec = TIMEOUT;
-    tv.tv_usec = 0;
+        frame_snd.frame_kind=1;
+        frame_snd.sq_no=frame_id;
 
-    setsockopt(sock,
-               SOL_SOCKET,
-               SO_RCVTIMEO,
-               (const char *)&tv,
-               sizeof(tv));
+        printf("\nEnter the data: ");
+        fgets(frame_snd.packet.data,sizeof(frame_snd.packet.data),stdin);
 
-    int packet_number = 1;
+       while(1){
 
-    while (packet_number <= 5)
-    {
-        sprintf(packet, "%d", packet_number);
+        int random=rand()%100;
 
-        printf("Client: Sending packet %d...\n", packet_number);
+        if(random < 80){
 
-        send(sock, packet, strlen(packet), 0);
+            printf("[Client] Frame %d sent (random=%d)\n",frame_id,random);
 
-        // Wait for ACK
-        int valread = read(sock, buffer, BUFFER_SIZE);
+            sendto(sockfd,&frame_snd,sizeof(Frame),0,(struct sockaddr *)&server,len);
 
-        if (valread > 0 && strcmp(buffer, "ACK") == 0)
-        {
-            printf("Client: ACK received for packet %d\n\n", packet_number);
-            packet_number++;
-        }
-        else
-        {
-            printf("Client: Timeout! Retransmitting packet %d...\n\n",
-                   packet_number);
+
+        }else{
+            printf("[Client] Frame Lost\n");
         }
 
-        memset(buffer, 0, BUFFER_SIZE);   // Clear buffer
+
+        int n = recvfrom(sockfd,&frame_recv,sizeof(Frame),0,(struct sockaddr *)&server,&len);
+
+        if(n>0){
+
+            if(frame_recv.ack == frame_id + 1){
+                printf("[Client] ACK %d received\n",frame_recv.ack);
+                frame_id ++;
+                break;
+
+
+            }else{
+                printf("[Client] ACK lost retransmitting\n");
+            }
+        }
+       }
+
+
+
+        
     }
 
-    printf("Client: All packets sent successfully.\n");
-
-    close(sock);
+    close(sockfd);
 
     return 0;
 }
