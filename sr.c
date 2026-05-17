@@ -1,98 +1,188 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<string.h>
+#include<time.h>
+#include<sys/time.h>
+#include<arpa/inet.h>
+#include<sys/socket.h>
 
-#define WINDOW_SIZE 4          
-#define TOTAL_FRAMES 10        
-#define LOSS_PROBABILITY 20    
+#define PORT 8080
+#define TOTAL_PACKTES 10
+#define WINDOW_SIZE 4
+#define BUFFER_SIZE 1024
+
+int received[100];
 
 
+int main(){
+    int sockfd;
+    struct sockaddr_in server,client;
+    char buffer[BUFFER_SIZE]={0};
+    socklen_t len=sizeof(client);
 
-int send_frame(int frame_number)
-{
-    printf("Sending frame %d...\n", frame_number);
+    sockfd=socket(AF_INET,SOCK_DGRAM,0);
 
-    sleep(1);  
+    server.sin_family=AF_INET;
+    server.sin_port=htons(PORT);
+    server.sin_addr.s_addr=INADDR_ANY;
 
-    int rand_value = rand() % 100;   
+    bind(sockfd,(struct sockaddr  *)&server,sizeof(server));
 
-    if (rand_value < LOSS_PROBABILITY)
-    {
-        printf("Frame %d lost during transmission!\n", frame_number);
-        return 0;
+    srand(time(0));
+
+    while(1){
+
+        memset(buffer,0,BUFFER_SIZE);
+
+        int n = recvfrom(sockfd,buffer,BUFFER_SIZE,0,(struct sockaddr *)&client,&len);
+
+        if(n > 0){
+
+            int seq = atoi(buffer);
+
+            if(received[seq] == 0){
+
+                received[seq] = 1;
+
+                int random=rand() % 100 ;
+
+                if(random < 80){
+
+                    printf("Server : Acknowledgement sent for packet %d\n\n",seq);
+
+                    memset(buffer,0,BUFFER_SIZE);
+                    sprintf(buffer,"%d",seq);
+                    sendto(sockfd,buffer,strlen(buffer),0,(struct sockaddr *)&client,len);
+                }else{
+
+                    printf("Server : Ack for packet %d lost\n",seq);
+                }
+            }else{
+
+                printf("Server : Duplicate Packet received\n");
+
+                memset(buffer,0,BUFFER_SIZE);
+
+                sprintf(buffer,"%d",seq);
+
+                sendto(sockfd,buffer,strlen(buffer),0,(struct sockaddr*)&client,len);
+
+                printf("Server : Ack resent for packet %d\n",seq);
+
+
+            }
+
+        }
     }
 
-    printf("Frame %d sent successfully.\n", frame_number);
-    return 1;
+    close(sockfd);
+    return 0;
+
+
 }
 
 
 
-int receive_ack(int frame_number)
-{
-    printf("Receiving acknowledgment for frame %d...\n", frame_number);
 
-    sleep(1);  
+#include<stdio.h>
+#include<stdlib.h>
+#include<unistd.h>
+#include<string.h>
+#include<time.h>
+#include<sys/time.h>
+#include<arpa/inet.h>
+#include<sys/socket.h>
 
-    int rand_value = rand() % 100;
-
-    if (rand_value < LOSS_PROBABILITY)
-    {
-        printf("Acknowledgment for frame %d lost!\n", frame_number);
-        return 0;
-    }
-
-    printf("Acknowledgment for frame %d received.\n", frame_number);
-    return 1;
-}
+#define PORT 8080
+#define TOTAL_PACKTES 10
+#define WINDOW_SIZE 4
+#define BUFFER_SIZE 1024
 
 
-void selective_repeat_arq()
-{
-    int sent_frames[TOTAL_FRAMES] = {0};    
-    int ack_received[TOTAL_FRAMES] = {0};    
+int main(){
 
-    int base = 0;   
+    int sockfd;
+    struct sockaddr_in server;
 
-    while (base < TOTAL_FRAMES)
-    {
+    char buffer[BUFFER_SIZE]={0};
+    socklen_t len=sizeof(server);
+
+    sockfd=socket(AF_INET,SOCK_DGRAM,0);
+
+    server.sin_family=AF_INET;
+    server.sin_port=htons(PORT);
+    server.sin_addr.s_addr=inet_addr("127.0.0.1");
+
+    srand(time(0));
+
+    struct timeval tv;
+    tv.tv_sec=2;
+    tv.tv_usec=0;
+
+    int packets_ack=0;
+    int base=1;
+    int next_to_send=1;
+
+    int acked[100] = {0};
+
+
+
+    setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+
+    while(base <= TOTAL_PACKTES){
+
+        while(next_to_send < base + WINDOW_SIZE && next_to_send <= TOTAL_PACKTES){
+
+            memset(buffer,0,BUFFER_SIZE);
+
+            printf("Client: Packet %d sent\n",next_to_send);
+
+            sprintf(buffer,"%d",next_to_send);
+            sendto(sockfd,buffer,strlen(buffer),0,(struct sockaddr*)&server,len);
+            next_to_send++;
+
+
+        }
+
+        memset(buffer,0,BUFFER_SIZE);
+        int n = recvfrom(sockfd,buffer,BUFFER_SIZE,0,(struct sockaddr *)&server,&len);
         
-        for (int i = base; i < base + WINDOW_SIZE && i < TOTAL_FRAMES; i++)
-        {
-            if (!sent_frames[i])
-            {
-                sent_frames[i] = send_frame(i);   
+        if(n > 0){
+
+            int ack = atoi(buffer);
+
+            printf("Client : Recieved ACK for %d\n",ack);
+
+            acked[ack] = 1;
+
+            while(acked[base] == 1){
+                base++;
             }
+
+            for(int i=base;i<next_to_send;i++){
+
+                if(acked[i] == 0){
+
+                    sprintf(buffer,"%d",i);
+                    sendto(sockfd,buffer,strlen(buffer),0,(struct sockaddr*)&server,len);
+
+                    printf("Client: Retransmitting packet %d \n",i);
+                }
+            }
+
+
         }
 
-       
-        for (int i = base; i < base + WINDOW_SIZE && i < TOTAL_FRAMES; i++)
-        {
-            if (sent_frames[i] && !ack_received[i])
-            {
-                ack_received[i] = receive_ack(i);   
-            }
-        }
 
-       
-        while (base < TOTAL_FRAMES && ack_received[base])
-        {
-            printf("Sliding window forward. Frame %d fully acknowledged.\n", base);
-            base++;
-        }
     }
 
-    printf("All frames sent and acknowledged successfully.\n");
-}
+    printf("All packets transmitted\n");
 
-
-
-int main()
-{
-    srand(time(0));   
-
-    selective_repeat_arq();
+    close(sockfd);
 
     return 0;
+
+
+
 }
