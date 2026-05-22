@@ -1,1 +1,0 @@
-const password = "1234567890"
