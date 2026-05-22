@@ -14,6 +14,8 @@ void handle_msg(int clientsock){
     char buffer[BUFFER_SIZE]={0};
     char msg[BUFFER_SIZE]={0};
 
+    //char *msg="220 SMTP SERVER Ready\r\n";
+
     strcpy(msg,"220 SMTP Server Ready\r\n");
 
     send(clientsock,msg,strlen(msg),0);
